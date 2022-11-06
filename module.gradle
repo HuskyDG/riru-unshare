@@ -6,8 +6,8 @@ ext {
     magiskModuleId = "riru-unshare"
 
     moduleName = "Riru - Enhanced mode for Magisk Hide"
-    moduleAuthor = "vvb2060"
-    moduleDescription = "Enable Enhanced mode for Magisk Hide. Allow Magisk Hide to handle isolated processes."
-    moduleVersion = "v2.0"
+    moduleAuthor = "vvb2060, HuskyDG"
+    moduleDescription = "Enable Enhanced mode for Magisk Hide. Allow Magisk Hide to handle isolated processes and app zygote."
+    moduleVersion = "v2.1"
     moduleVersionCode = 2
 }

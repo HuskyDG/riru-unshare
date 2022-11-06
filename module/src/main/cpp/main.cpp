@@ -7,6 +7,18 @@
 #include "nativehelper/scoped_utf_chars.h"
 #include "android_filesystem_config.h"
 
+static bool is_app_zygote = false;
+jstring* nice_name_ = nullptr;
+
+static bool is_app(int uid) {
+    return uid%100000 >= 10000 && uid%100000 <= 19999;
+}
+
+static void clear_state(){
+    nice_name_ = nullptr;
+    is_app_zygote = false;
+}
+
 static int shouldSkipUid(int uid) {
     int appid = uid % AID_USER_OFFSET;
     if (appid >= AID_APP_START && appid <= AID_APP_END) return false;
@@ -14,13 +26,31 @@ static int shouldSkipUid(int uid) {
     return true;
 }
 
-static void doUnshare(JNIEnv *env, jint *uid, jint *mountExternal, jstring *niceName) {
+static void doUnshare(JNIEnv *env, jint *uid, jint *mountExternal, jstring *niceName, bool is_child_zygote) {
     if (shouldSkipUid(*uid)) return;
     if (*mountExternal == 0) {
         *mountExternal = 1;
         ScopedUtfChars name(env, *niceName);
-        LOGI("unshare uid=%d name=%s", *uid, name.c_str());
+        is_app_zygote = is_child_zygote && is_app(*uid);
+        nice_name_ = niceName;
+        LOGI("unshare uid=%d name=%s app_zygote=%s", *uid, name.c_str(), is_app_zygote?"true":"false");
     }
+}
+
+void SetProcessName(JNIEnv* env, jstring name) {
+    jclass Process = env->FindClass("android/os/Process");
+    jmethodID setArgV0 = env->GetStaticMethodID(Process, "setArgV0", "(Ljava/lang/String;)V");
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        LOGW("Process.setArgV0(String) not found");
+    } else {
+        env->CallStaticVoidMethod(Process, setArgV0, name);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            LOGW("Process.setArgV0(String) threw exception");
+        }
+    }
+    env->DeleteLocalRef(Process);
 }
 
 static void forkAndSpecializePre(
@@ -29,11 +59,14 @@ static void forkAndSpecializePre(
         jintArray *fdsToClose, jintArray *fdsToIgnore, jboolean *is_child_zygote,
         jstring *instructionSet, jstring *appDataDir, jboolean *isTopApp, jobjectArray *pkgDataInfoList,
         jobjectArray *whitelistedDataInfoList, jboolean *bindMountAppDataDirs, jboolean *bindMountAppStorageDirs) {
-    doUnshare(env, uid, mountExternal, niceName);
+    doUnshare(env, uid, mountExternal, niceName, *is_child_zygote);
 }
 
 static void forkAndSpecializePost(JNIEnv *env, jclass clazz, jint res) {
     if (res == 0) {
+        if (is_app_zygote && nice_name_)
+            SetProcessName(env, *nice_name_);
+        clear_state();
         riru_set_unload_allowed(true);
     }
 }
@@ -44,10 +77,11 @@ static void specializeAppProcessPre(
         jboolean *startChildZygote, jstring *instructionSet, jstring *appDataDir,
         jboolean *isTopApp, jobjectArray *pkgDataInfoList, jobjectArray *whitelistedDataInfoList,
         jboolean *bindMountAppDataDirs, jboolean *bindMountAppStorageDirs) {
-    doUnshare(env, uid, mountExternal, niceName);
+    doUnshare(env, uid, mountExternal, niceName, false);
 }
 
 static void specializeAppProcessPost(JNIEnv *env, jclass clazz) {
+    clear_state();
     riru_set_unload_allowed(true);
 }
 
